@@ -493,7 +493,7 @@ static DirEntry *search_from(int block, DirEntry *out)
             memcpy(out->name, name, sizeof out->name);
             out->attr = STATE_FIRST;
             memcpy(&out->size, d + 4, 4);
-            out->head = block;
+            out->head = block * (BLOCK / FRAME); /* the first sector of the file, as the BIOS reports it */
             s_search_block = block + 1;
             return out;
         }

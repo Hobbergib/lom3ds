@@ -127,6 +127,27 @@ void psx_relocate(const PsxModule *module, uint8_t *start, uint32_t size)
             module->name, typed_count, guessed, left, missing);
 }
 
+/* The overlay last loaded into each of the two slots. */
+#define SECONDARY_SLOT 0x80140000u
+static const PsxModule *s_loaded[2];
+
+/* The native function for a PlayStation address inside an overlay slot,
+ * taken from the overlay loaded there. The game calls some overlay entry
+ * points by address alone: several overlays share the address, and which
+ * one is meant depends on what is loaded. */
+void (*psx_lookup_function(uint32_t addr))(void);
+void (*psx_lookup_function(uint32_t addr))(void)
+{
+    const PsxModule *m = s_loaded[addr >= SECONDARY_SLOT];
+    const PsxFunction *f = m ? find_function(m, addr) : NULL;
+
+    if (!f || !f->native) {
+        psx_fatal("the game called %08lX, which is not a function of the loaded overlay (%s)", (unsigned long)addr,
+                  m ? m->name : "none");
+    }
+    return f->native;
+}
+
 /* Wraps the game's loader: an overlay that has just been read into one of
  * the two overlay slots gets its pointers relocated before it runs. */
 int32_t psx_cdrom_stream(int32_t resource_index, uint8_t *destination)
@@ -141,6 +162,7 @@ int32_t psx_cdrom_stream(int32_t resource_index, uint8_t *destination)
             !memcmp(destination, m->overlay_id, OVERLAY_ID_SIZE)) {
             psx_log("overlay %s loaded", m->name);
             psx_relocate(m, destination, (uint32_t)size);
+            s_loaded[m->load_addr >= SECONDARY_SLOT] = m;
             break;
         }
     }
