@@ -90,6 +90,11 @@ const char *plat_vram_dump_path(void);
 /* The file this program was started from, which an update replaces, or NULL
  * if it is not known or not replaceable. */
 const char *plat_program_path(void);
+/* True if the program runs as an installed title: an update is then a
+ * package (.cia) handed to plat_install_package. */
+bool plat_is_installed(void);
+/* Installs the package file at `path` over this title. */
+bool plat_install_package(const char *path, char *err, size_t err_size);
 /* Brings up networking; safe to repeat. On failure writes the reason. */
 bool plat_net_start(char *err, size_t err_size);
 /* Root certificates (PEM) to verify servers with, or NULL to use the

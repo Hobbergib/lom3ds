@@ -57,6 +57,21 @@ const char *plat_program_path(void)
     return getenv("LOM3DS_UPDATE_TARGET");
 }
 
+/* The host stands in for an installed title when asked to, and "installs"
+ * by leaving the downloaded package where it is. */
+bool plat_is_installed(void)
+{
+    return getenv("LOM3DS_UPDATE_AS_CIA") != NULL;
+}
+
+bool plat_install_package(const char *path, char *err, size_t err_size)
+{
+    (void)path;
+    (void)err;
+    (void)err_size;
+    return true;
+}
+
 bool plat_net_start(char *err, size_t err_size)
 {
     (void)err;

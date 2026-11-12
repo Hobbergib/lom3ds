@@ -68,8 +68,9 @@ static void show_progress(unsigned long done, unsigned long total)
 static void update_step(void)
 {
     char err[120] = "";
+    bool installed;
 
-    if (!plat_program_path()) {
+    if (!plat_is_installed() && !plat_program_path()) {
         s_update = UPDATE_FAILED;
         snprintf(s_update_text, sizeof s_update_text, "This build cannot update itself.");
         return;
@@ -89,8 +90,32 @@ static void update_step(void)
         log_line("update check: %s", s_update_text);
         return;
     }
-    show_progress(0, s_update_info.size);
-    if (update_install(&s_update_info, plat_program_path(), show_progress, err, sizeof err)) {
+    if (plat_is_installed()) {
+        /* An installed title takes the package: fetched to the data
+         * directory, handed to the system, then removed. */
+        char package[512];
+        bool ok = s_update_info.cia_size != 0;
+
+        snprintf(package, sizeof package, "%s/update.cia", plat_data_dir());
+        if (!ok) {
+            snprintf(err, sizeof err, "this release has no installable package");
+        } else {
+            show_progress(0, s_update_info.cia_size);
+            ok = update_download("lom3ds.cia", s_update_info.cia_size, s_update_info.cia_sha256, package, show_progress, err,
+                                 sizeof err);
+        }
+        if (ok) {
+            show_status("Installing...");
+            ok = plat_install_package(package, err, sizeof err);
+            remove(package);
+        }
+        installed = ok;
+    } else {
+        show_progress(0, s_update_info.size);
+        installed = update_download("lom3ds.3dsx", s_update_info.size, s_update_info.sha256, plat_program_path(), show_progress,
+                                    err, sizeof err);
+    }
+    if (installed) {
         s_update = UPDATE_DONE;
         snprintf(s_update_text, sizeof s_update_text, "Updated to build %s. Press any button to close,\nthen start it again.",
                  s_update_info.build);

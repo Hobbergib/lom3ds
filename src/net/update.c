@@ -114,13 +114,24 @@ bool update_check(UpdateInfo *info, char *err, size_t err_size)
         snprintf(err, err_size, "the release's version.txt could not be understood");
         return false;
     }
+    /* Later releases also carry an installable package. */
+    {
+        const char *cia = strstr(text, "cia_size ");
+
+        if (!cia || sscanf(cia, "cia_size %lu cia_sha256 %64[0-9a-f]", &info->cia_size, info->cia_sha256) != 2 ||
+            strlen(info->cia_sha256) != 64 || info->cia_size == 0 || info->cia_size > MAX_PROGRAM_SIZE) {
+            info->cia_size = 0;
+            info->cia_sha256[0] = '\0';
+        }
+    }
     return true;
 }
 
-bool update_install(const UpdateInfo *info, const char *target, UpdateProgress progress, char *err, size_t err_size)
+bool update_download(const char *name, unsigned long size, const char *sha256, const char *target, UpdateProgress progress,
+                     char *err, size_t err_size)
 {
     static char buffer[1 << 16];
-    Transfer t = {.total = info->size, .progress = progress};
+    Transfer t = {.total = size, .progress = progress};
     char fresh[512], old[512], digest[65];
     bool ok;
 
@@ -133,14 +144,14 @@ bool update_install(const UpdateInfo *info, const char *target, UpdateProgress p
     }
     setvbuf(t.file, buffer, _IOFBF, sizeof buffer);
     sha256_init(&t.hash);
-    ok = fetch("lom3ds.3dsx", &t, err, err_size);
+    ok = fetch(name, &t, err, err_size);
     if (fclose(t.file) != 0 && ok) {
         snprintf(err, err_size, "could not write %s (is the SD card full?)", fresh);
         ok = false;
     }
     if (ok) {
         sha256_final_hex(&t.hash, digest);
-        if (t.done != info->size || strcmp(digest, info->sha256) != 0) {
+        if (t.done != size || strcmp(digest, sha256) != 0) {
             snprintf(err, err_size, "the download does not match the release; nothing was changed");
             ok = false;
         }

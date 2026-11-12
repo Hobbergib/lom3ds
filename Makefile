@@ -1,6 +1,7 @@
 # Legend of Mana for Nintendo 3DS
 #
 #   make          build/lom3ds.3dsx   (Homebrew Launcher)
+#   make cia      build/lom3ds.cia    (installs to the HOME Menu)
 #   make host     build/host/lom3ds-host   (headless Linux build, 32-bit like the 3DS)
 #   make test     host unit tests and a scripted run of the menus
 #   make shots    screenshots of the menus as PNG, in build/shots/ui
@@ -65,9 +66,10 @@ TEST_DATA := $(BUILD)/testdata
 # The SDK entry points are declared by the game's headers, not ours.
 $(BUILD)/3ds/src/psx/%.o $(BUILD)/host/src/psx/%.o: EXTRA := -Wno-missing-prototypes
 
-.PHONY: all 3dsx host test shots release logs clean FORCE
+.PHONY: all 3dsx cia host test shots release logs clean FORCE
 all: 3dsx
 3dsx: $(BUILD)/lom3ds.3dsx
+cia: $(BUILD)/lom3ds.cia
 host: $(BUILD)/host/lom3ds-host
 
 # The game code: tools/build_game.py rebuilds only what changed.
@@ -127,6 +129,17 @@ $(BUILD)/lom3ds.smdh: assets/icon.png Makefile
 $(BUILD)/lom3ds.3dsx: $(BUILD)/lom3ds.elf $(BUILD)/lom3ds.smdh
 	$(DKP_TOOLS)/3dsxtool $< $@ --smdh=$(BUILD)/lom3ds.smdh
 
+# The installable package. The banner picture and chime are drawn by a
+# script; makerom and bannertool sit next to the toolchain.
+CIA_TOOLS ?= $(abspath ../toolchain/bin)
+assets/banner.png assets/banner.wav: tools/mkbanner.py
+	python3 tools/mkbanner.py assets/banner.png assets/banner.wav
+$(BUILD)/banner.bnr: assets/banner.png assets/banner.wav
+	$(CIA_TOOLS)/bannertool makebanner -i assets/banner.png -a assets/banner.wav -o $@
+$(BUILD)/lom3ds.cia: $(BUILD)/lom3ds.elf $(BUILD)/lom3ds.smdh $(BUILD)/banner.bnr cia/lom3ds.rsf
+	$(CIA_TOOLS)/makerom -f cia -o $@ -rsf cia/lom3ds.rsf -target t -exefslogo -elf $(BUILD)/lom3ds.elf \
+		-icon $(BUILD)/lom3ds.smdh -banner $(BUILD)/banner.bnr
+
 $(BUILD)/host/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC_HOST) $(CFLAGS_HOST) $(EXTRA) -MMD -MP -c $< -o $@
@@ -155,14 +168,15 @@ shots: test
 
 # Publishes the current build as the newest release, where the updater in
 # the program finds it. Needs the GitHub CLI, signed in.
-release: 3dsx
+release: 3dsx cia
 	@id=$$(sed 's/.*"\(.*\)"/\1/' $(BUILD)/3ds/build_id.h); \
-	printf 'build %s\nsize %s\nsha256 %s\n' "$$id" "$$(stat -c %s $(BUILD)/lom3ds.3dsx)" \
-		"$$(sha256sum $(BUILD)/lom3ds.3dsx | cut -d' ' -f1)" > $(BUILD)/version.txt; \
+	printf 'build %s\nsize %s\nsha256 %s\ncia_size %s\ncia_sha256 %s\n' "$$id" "$$(stat -c %s $(BUILD)/lom3ds.3dsx)" \
+		"$$(sha256sum $(BUILD)/lom3ds.3dsx | cut -d' ' -f1)" "$$(stat -c %s $(BUILD)/lom3ds.cia)" \
+		"$$(sha256sum $(BUILD)/lom3ds.cia | cut -d' ' -f1)" > $(BUILD)/version.txt; \
 	cat $(BUILD)/version.txt; \
 	mkdir -p releases && cp $(BUILD)/lom3ds.elf "releases/$$id.elf"; \
 	gh release create "build-$$id" --repo $(REPO) --title "Build $$id" --notes "" --latest \
-		$(BUILD)/lom3ds.3dsx $(BUILD)/version.txt
+		$(BUILD)/lom3ds.3dsx $(BUILD)/lom3ds.cia $(BUILD)/version.txt
 
 # Waits for logs sent from the console's start screen (X) and keeps them in logs/.
 logs:

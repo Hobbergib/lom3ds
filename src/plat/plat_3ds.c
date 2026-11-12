@@ -201,6 +201,48 @@ const char *plat_program_path(void)
     return s_program_path;
 }
 
+bool plat_is_installed(void)
+{
+    return !envIsHomebrew();
+}
+
+bool plat_install_package(const char *path, char *err, size_t err_size)
+{
+    static u8 buffer[1 << 16];
+    FILE *f = fopen(path, "rb");
+    Handle cia;
+    Result rc;
+    u32 offset = 0, written;
+    size_t n;
+
+    if (!f) {
+        snprintf(err, err_size, "could not open the downloaded package");
+        return false;
+    }
+    rc = amInit();
+    if (R_SUCCEEDED(rc)) {
+        rc = AM_StartCiaInstall(MEDIATYPE_SD, &cia);
+        if (R_SUCCEEDED(rc)) {
+            while (R_SUCCEEDED(rc) && (n = fread(buffer, 1, sizeof buffer, f)) > 0) {
+                rc = FSFILE_Write(cia, &written, offset, buffer, (u32)n, 0);
+                offset += (u32)n;
+            }
+            if (R_SUCCEEDED(rc)) {
+                rc = AM_FinishCiaInstall(cia);
+            } else {
+                AM_CancelCIAInstall(cia);
+            }
+        }
+        amExit();
+    }
+    fclose(f);
+    if (R_FAILED(rc)) {
+        snprintf(err, err_size, "the system refused the package (error %08lX)", (unsigned long)rc);
+        return false;
+    }
+    return true;
+}
+
 bool plat_net_start(char *err, size_t err_size)
 {
     static bool started;
