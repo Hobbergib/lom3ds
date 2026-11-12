@@ -2,6 +2,7 @@
 
 #include "../core/config.h"
 #include "../core/log.h"
+#include "../net/sendlog.h"
 #include "../net/update.h"
 #include "../plat/plat.h"
 #include "gfx.h"
@@ -147,7 +148,8 @@ static void draw_top(Surface *s, const RomInfo *rom)
     }
     if (s_update != UPDATE_DONE) {
         gfx_text_centered(s, TOP_W / 2, TOP_H - 13,
-                          rom->status == ROM_OK ? "A / START  Begin          Y  Update" : "A  Look again      Y  Update      START  Quit",
+                          rom->status == ROM_OK ? "A / START  Begin      Y  Update      X  Send logs"
+                                                : "A  Look again    Y  Update    X  Send logs    START  Quit",
                           COL_CREAM, 1);
     }
 }
@@ -196,6 +198,15 @@ bool launcher_run(RomInfo *rom)
         }
         if (in.down & PK_Y) {
             update_step();
+            continue;
+        }
+        if (in.down & PK_X) {
+            char result[120];
+
+            show_status("Sending the logs...");
+            s_update = sendlog_run(plat_data_dir(), result, sizeof result) ? UPDATE_IDLE : UPDATE_FAILED;
+            snprintf(s_update_text, sizeof s_update_text, "%s", result);
+            log_line("send logs: %s", result);
             continue;
         }
         /* With a disc ready, START begins the game like A does: it is the

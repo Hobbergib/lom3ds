@@ -65,7 +65,7 @@ TEST_DATA := $(BUILD)/testdata
 # The SDK entry points are declared by the game's headers, not ours.
 $(BUILD)/3ds/src/psx/%.o $(BUILD)/host/src/psx/%.o: EXTRA := -Wno-missing-prototypes
 
-.PHONY: all 3dsx host test shots release clean FORCE
+.PHONY: all 3dsx host test shots release logs clean FORCE
 all: 3dsx
 3dsx: $(BUILD)/lom3ds.3dsx
 host: $(BUILD)/host/lom3ds-host
@@ -160,8 +160,13 @@ release: 3dsx
 	printf 'build %s\nsize %s\nsha256 %s\n' "$$id" "$$(stat -c %s $(BUILD)/lom3ds.3dsx)" \
 		"$$(sha256sum $(BUILD)/lom3ds.3dsx | cut -d' ' -f1)" > $(BUILD)/version.txt; \
 	cat $(BUILD)/version.txt; \
+	mkdir -p releases && cp $(BUILD)/lom3ds.elf "releases/$$id.elf"; \
 	gh release create "build-$$id" --repo $(REPO) --title "Build $$id" --notes "" --latest \
 		$(BUILD)/lom3ds.3dsx $(BUILD)/version.txt
+
+# Waits for logs sent from the console's start screen (X) and keeps them in logs/.
+logs:
+	python3 tools/logserver.py logs
 
 clean:
 	rm -rf $(BUILD)
