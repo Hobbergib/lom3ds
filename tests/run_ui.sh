@@ -37,17 +37,25 @@ run clamp empty "R,R,RIGHT,RIGHT,RIGHT,RIGHT,RIGHT,shot"
 [ "$(value "$data/empty" volume)" = 10 ] || fail "volume did not stop at 10"
 [ "$(value "$data/empty" screen_fit)" = 1 ] || fail "screen_fit was not kept"
 
-# Control bindings: giving Cross the control Triangle holds swaps the two.
+# Control bindings: stepping one leaves the others alone, even when two
+# then share a control.
 rm -f "$data/empty/config.ini"
 run bind empty "R,R,R,RIGHT,shot"
-[ "$(value "$data/empty" bind_cross)" = 2 ] || fail "Cross was not rebound to X"
+[ "$(value "$data/empty" bind_cross)" = 1 ] || fail "Cross was not rebound to B"
+[ "$(value "$data/empty" bind_circle)" = 1 ] || fail "rebinding Cross changed Circle"
 # The same by touch, in the right-hand column: R1's right arrow gives it ZL,
-# which L2 held.
+# which L2 keeps.
 run bindtouch empty "T270:15,T290:74,shot"
 [ "$(value "$data/empty" bind_r1)" = 6 ] || fail "touch did not rebind R1"
-[ "$(value "$data/empty" bind_l2)" = 5 ] || fail "L2 did not take over R"
-[ "$(value "$data/empty" bind_cross)" = 2 ] || fail "Cross was not rebound to X"
-[ "$(value "$data/empty" bind_triangle)" = 1 ] || fail "Triangle did not take over B"
+[ "$(value "$data/empty" bind_l2)" = 6 ] || fail "rebinding R1 changed L2"
+# The reset button under the bindings, by keys (up from the first row) and
+# by touch, puts them all back.
+run reset empty "R,R,R,UP,RIGHT,shot"
+[ "$(value "$data/empty" bind_cross)" = 0 ] || fail "reset did not restore Cross"
+[ "$(value "$data/empty" bind_r1)" = 5 ] || fail "reset did not restore R1"
+run bind empty "R,R,R,RIGHT"
+run resettouch empty "T270:15,T160:162,shot"
+[ "$(value "$data/empty" bind_cross)" = 0 ] || fail "touching reset did not restore Cross"
 
 # The original 3DS has no ZL or ZR: they are not offered, and L2 and R2
 # start unbound.
@@ -56,7 +64,7 @@ rm -f "$data/empty/config.ini"
 LOM3DS_OLD3DS=1 run old3ds empty "R,R,R,DOWN*5,RIGHT,RIGHT,shot"
 [ "$(value "$data/empty" bind_l2)" = 10 ] || fail "L2 is bound on a console without ZL"
 [ "$(value "$data/empty" bind_l1)" = 8 ] || fail "L1 did not skip ZL and ZR"
-[ "$(value "$data/empty" bind_start)" = 5 ] || fail "Start did not take over the control L1 gave up"
+[ "$(value "$data/empty" bind_start)" = 8 ] || fail "rebinding L1 changed Start"
 
 rm -f "$data/empty/config.ini"
 echo "all UI runs passed"

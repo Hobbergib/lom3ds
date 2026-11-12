@@ -41,8 +41,8 @@ const OptDef g_opt_defs[OPT_COUNT] = {
                            TAB_AUDIO, INTERP_GAUSSIAN, CHOICES(s_interp)},
     [OPT_REVERB] = {"reverb", "Reverb", "The echo effect of the original\nsound chip.", TAB_AUDIO, 1, CHOICES(s_off_on)},
     /* The buttons keep the places they have on a PlayStation pad. */
-    [OPT_BIND_CROSS] = BINDING("bind_cross", "Cross", TAB_CONTROLS, BIND_B),
-    [OPT_BIND_CIRCLE] = BINDING("bind_circle", "Circle", TAB_CONTROLS, BIND_A),
+    [OPT_BIND_CROSS] = BINDING("bind_cross", "Cross", TAB_CONTROLS, BIND_A),
+    [OPT_BIND_CIRCLE] = BINDING("bind_circle", "Circle", TAB_CONTROLS, BIND_B),
     [OPT_BIND_SQUARE] = BINDING("bind_square", "Square", TAB_CONTROLS, BIND_Y),
     [OPT_BIND_TRIANGLE] = BINDING("bind_triangle", "Triangle", TAB_CONTROLS, BIND_X),
     [OPT_BIND_START] = BINDING("bind_start", "Start", TAB_CONTROLS, BIND_START),
@@ -79,6 +79,18 @@ void config_reset(void)
 
     for (i = 0; i < OPT_COUNT; i++) {
         g_opt[i] = g_opt_defs[i].def;
+    }
+    drop_unavailable();
+}
+
+void config_reset_bindings(void)
+{
+    int i;
+
+    for (i = 0; i < OPT_COUNT; i++) {
+        if (g_opt_defs[i].binding) {
+            g_opt[i] = g_opt_defs[i].def;
+        }
     }
     drop_unavailable();
 }

@@ -68,6 +68,8 @@ extern bool g_config_has_zl_zr;
 bool config_choice_available(int id, int value);
 
 void config_reset(void);
+/* Puts only the control bindings back to their defaults. */
+void config_reset_bindings(void);
 /* Missing files, unknown keys and out-of-range values fall back to defaults. */
 void config_load(const char *dir);
 /* Returns false if the file could not be written. */

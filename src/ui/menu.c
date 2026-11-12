@@ -4,6 +4,8 @@
 #include "../port/icons.h"
 #include "../port/input.h"
 
+#include <string.h>
+
 #define MARGIN 8
 #define TAB_Y 6
 #define TAB_H 20
@@ -69,11 +71,11 @@ static void select_tab(int tab)
 }
 
 /* A control binding goes round its choices, skipping controls this console
- * lacks. Taking a control another binding holds hands that one the control
- * given up, so no control ends up doing two things. */
+ * lacks. The other bindings are left alone, so one control may end up
+ * bound twice until the player sorts it out. */
 static bool step_binding(int id, int dir)
 {
-    int count = g_opt_defs[id].count, old = g_opt[id], v = old, i;
+    int count = g_opt_defs[id].count, old = g_opt[id], v = old;
 
     do {
         v = (v + dir + count) % count;
@@ -81,13 +83,36 @@ static bool step_binding(int id, int dir)
     if (v == old) {
         return false;
     }
-    for (i = 0; i < OPT_COUNT; i++) {
-        if (i != id && g_opt_defs[i].binding && g_opt[i] == v && v != BIND_NONE) {
-            g_opt[i] = (uint8_t)old;
-        }
-    }
     g_opt[id] = (uint8_t)v;
     return true;
+}
+
+/* The Controls tab ends with a button that restores the default bindings.
+ * It is one more row after the options, selected like them and pressed
+ * with Left, Right or a touch. */
+#define RESET_LABEL "Reset to default"
+#define RESET_HELP "Puts every control back to its default.\nPress Left or Right, or touch it."
+
+static bool has_reset_row(void)
+{
+    return s_tab == TAB_CONTROLS;
+}
+
+static Cell reset_cell(int n)
+{
+    Cell last = cell_of(n - 1, n);
+    Cell c = {ROW_X, last.y + ROW_H, ROW_W, ROW_X, ROW_W};
+
+    return c;
+}
+
+static bool reset_bindings(void)
+{
+    uint8_t before[OPT_COUNT];
+
+    memcpy(before, g_opt, sizeof before);
+    config_reset_bindings();
+    return memcmp(before, g_opt, sizeof before) != 0;
 }
 
 /* Two-choice options flip; longer lists stop at their ends. */
@@ -113,17 +138,22 @@ bool menu_update(const PlatInput *in, bool use_keys)
 {
     int ids[OPT_COUNT];
     int n = tab_options(ids);
-    int old_tab = s_tab, old_row = s_row;
+    int old_tab = s_tab, old_row = s_row, rows;
     bool changed = false;
 
     if (use_keys) {
         if (in->down & PK_L) select_tab(s_tab - 1);
         if (in->down & PK_R) select_tab(s_tab + 1);
         n = tab_options(ids);
-        if (in->repeat & PK_UP) s_row = (s_row + n - 1) % n;
-        if (in->repeat & PK_DOWN) s_row = (s_row + 1) % n;
-        if (in->repeat & PK_LEFT) changed |= step_value(ids[s_row], -1);
-        if (in->repeat & PK_RIGHT) changed |= step_value(ids[s_row], 1);
+        rows = n + (has_reset_row() ? 1 : 0);
+        if (in->repeat & PK_UP) s_row = (s_row + rows - 1) % rows;
+        if (in->repeat & PK_DOWN) s_row = (s_row + 1) % rows;
+        if (s_row == n) {
+            if (in->down & (PK_LEFT | PK_RIGHT)) changed |= reset_bindings();
+        } else {
+            if (in->repeat & PK_LEFT) changed |= step_value(ids[s_row], -1);
+            if (in->repeat & PK_RIGHT) changed |= step_value(ids[s_row], 1);
+        }
     }
 
     if (in->touch_down) {
@@ -146,6 +176,14 @@ bool menu_update(const PlatInput *in, bool use_keys)
                         changed |= step_value(ids[i], x < c.value_x + c.value_w / 2 ? -1 : 1);
                     }
                     break;
+                }
+            }
+            if (has_reset_row()) {
+                Cell c = reset_cell(n);
+
+                if (x >= c.x && x < c.x + c.w && y >= c.y && y < c.y + ROW_H) {
+                    s_row = n;
+                    changed |= reset_bindings();
                 }
             }
         }
@@ -203,6 +241,14 @@ void menu_draw(Surface *s)
         gfx_arrow(s, c.value_x + c.value_w - 9, mid, 5, 1, arrow);
     }
 
+    if (has_reset_row()) {
+        Cell c = reset_cell(n);
+        bool sel = s_row == n;
+
+        ui_plaque(s, c.x + c.w / 4, c.y, c.w / 2, ROW_H - 2, sel);
+        gfx_text_centered(s, c.x + c.w / 2, c.y + ROW_H / 2 - 4, RESET_LABEL, sel ? COL_GOLD_HI : COL_GOLD, 1);
+    }
+
     ui_panel(s, MARGIN, HELP_Y, BOT_W - 2 * MARGIN, HELP_H);
-    gfx_text(s, MARGIN + 12, HELP_Y + 13, g_opt_defs[ids[s_row]].help, COL_INK, 1);
+    gfx_text(s, MARGIN + 12, HELP_Y + 13, s_row == n ? RESET_HELP : g_opt_defs[ids[s_row]].help, COL_INK, 1);
 }
