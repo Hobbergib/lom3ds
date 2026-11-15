@@ -16,6 +16,10 @@ typedef struct {
     uint32_t sector_size; /* bytes per sector in the image file */
     uint32_t data_offset; /* offset of the 2048 user bytes within a sector */
     uint32_t sectors;
+    /* Read-ahead: whole image sectors [cache_lba, cache_lba + cache_count).
+     * One large read costs about what one sector does on a 3DS SD card. */
+    uint8_t *cache;
+    uint32_t cache_lba, cache_count;
 } Disc;
 
 typedef struct {

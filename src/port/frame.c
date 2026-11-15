@@ -94,6 +94,7 @@ static struct {
     uint32_t work_max;
     uint64_t show_total;     /* converting the picture and copying it to the screens */
     uint64_t draw_total;     /* the game's drawing, inside the work time */
+    uint64_t disc_total;     /* reading the disc image, inside the work time */
     char text[40];           /* summary of the last finished window */
 } s_perf;
 
@@ -109,6 +110,8 @@ static bool perf_frame_start(uint64_t now)
     s_perf.work_total += work;
     s_perf.draw_total += psx_draw_time_us;
     psx_draw_time_us = 0;
+    s_perf.disc_total += psx_disc_time_us;
+    psx_disc_time_us = 0;
     if (work > s_perf.work_max) {
         s_perf.work_max = work;
     }
@@ -123,15 +126,17 @@ static bool perf_frame_start(uint64_t now)
         snprintf(s_perf.text, sizeof s_perf.text, "%u.%u fps  %u.%u ms", (unsigned)(fps10 / 10), (unsigned)(fps10 % 10),
                  (unsigned)(avg / 1000), (unsigned)(avg % 1000 / 100));
         uint32_t draw = (uint32_t)(s_perf.draw_total / PERF_WINDOW), show = (uint32_t)(s_perf.show_total / PERF_WINDOW);
+        uint32_t disc = (uint32_t)(s_perf.disc_total / PERF_WINDOW);
 
-        psx_log("speed: %u.%u frames/s, work per frame %u.%u ms average (drawing %u.%u), %u.%u ms worst, "
+        psx_log("speed: %u.%u frames/s, work per frame %u.%u ms average (drawing %u.%u, disc %u.%u), %u.%u ms worst, "
                 "%u of %d frames over budget; showing the picture %u.%u ms",
                 (unsigned)(fps10 / 10), (unsigned)(fps10 % 10), (unsigned)(avg / 1000), (unsigned)(avg % 1000 / 100),
-                (unsigned)(draw / 1000), (unsigned)(draw % 1000 / 100), (unsigned)(s_perf.work_max / 1000),
+                (unsigned)(draw / 1000), (unsigned)(draw % 1000 / 100), (unsigned)(disc / 1000),
+                (unsigned)(disc % 1000 / 100), (unsigned)(s_perf.work_max / 1000),
                 (unsigned)(s_perf.work_max % 1000 / 100), (unsigned)s_perf.late, PERF_WINDOW, (unsigned)(show / 1000),
                 (unsigned)(show % 1000 / 100));
         s_perf.frames = s_perf.late = s_perf.work_max = 0;
-        s_perf.work_total = s_perf.show_total = s_perf.draw_total = 0;
+        s_perf.work_total = s_perf.show_total = s_perf.draw_total = s_perf.disc_total = 0;
         s_perf.window_start = now;
         return true;
     }

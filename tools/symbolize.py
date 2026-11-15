@@ -18,8 +18,11 @@ devkitarm = os.environ.get("DEVKITARM", str(PORT.parent / "toolchain" / "devkitp
 log = pathlib.Path(sys.argv[1]).read_text(errors="replace")
 elf = sys.argv[2] if len(sys.argv) > 2 else str(PORT / "build" / "lom3ds.elf")
 
-# __DATE__ __TIME__, e.g. "Nov 11 2026 04:59:00" (the day is space-padded).
-stamp = re.search(r"build (\w{3} [ \d]\d \d{4} \d\d:\d\d:\d\d)", log)
+# The first line names the build, e.g. "build 20261112-153021"; release
+# ELFs are kept as releases/<build>.elf by "make release".
+stamp = re.search(r"build (\d{8}-\d{6})", log)
+if len(sys.argv) <= 2 and stamp and (PORT / "releases" / f"{stamp.group(1)}.elf").exists():
+    elf = str(PORT / "releases" / f"{stamp.group(1)}.elf")
 if not stamp:
     print("warning: the log has no build stamp; cannot check it against the ELF\n")
 elif stamp.group(1).encode() not in pathlib.Path(elf).read_bytes():
@@ -27,7 +30,8 @@ elif stamp.group(1).encode() not in pathlib.Path(elf).read_bytes():
 
 for line in log.split("\n"):
     print(line)
-    if not line.startswith(("crash", "  stack", "  pc")):
+    # Lines start with a timestamp: "578.081  crash: ...", "578.094    pc ...".
+    if not re.match(r"\s*[\d.]*\s+(crash:|pc |stack |read through a null pointer)", line):
         continue
     for addr in re.findall(r"\b(00[1-9a-f][0-9a-f]{5})\b", line):
         out = subprocess.run([f"{devkitarm}/bin/arm-none-eabi-addr2line", "-f", "-p", "-e", elf, addr],

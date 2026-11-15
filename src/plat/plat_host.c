@@ -116,6 +116,11 @@ void plat_exit(void)
     }
 }
 
+int plat_audio_due(int nominal)
+{
+    return nominal;
+}
+
 void plat_audio_submit(const int16_t *samples, int frames)
 {
     if (s_wav) {

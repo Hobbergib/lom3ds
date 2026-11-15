@@ -266,8 +266,8 @@ static void run_sound_for_frame(void)
     static uint32_t until_tick;   /* system clock cycles before the next tick */
     static uint32_t sample_carry; /* cycles not yet turned into samples */
     RootCounter *c = &s_counters[2];
-    uint32_t cycles = (uint32_t)(SAMPLE_RATE / FRAMES_PER_SECOND) * CLOCK_CYCLES_PER_SAMPLE;
-    int left = SAMPLE_RATE / FRAMES_PER_SECOND;
+    int left = plat_audio_due(SAMPLE_RATE / FRAMES_PER_SECOND);
+    uint32_t cycles = (uint32_t)left * CLOCK_CYCLES_PER_SAMPLE;
 
     if (c->running && (c->mode & RCNT_MODE_INTERRUPT)) {
         uint32_t period = (c->target ? c->target : 0x10000u) * ((c->mode & RCNT_MODE_SYSTEM_CLOCK) ? 1u : 8u);

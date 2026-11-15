@@ -8,6 +8,7 @@
  * often the game polls; real-time streams run at the drive's double speed
  * because the game times video and audio by them. */
 #include "psx.h"
+#include "../plat/plat.h"
 
 #include <string.h>
 
@@ -49,6 +50,7 @@ typedef struct {
 } CdLoc;
 
 static Disc *s_disc;
+uint32_t psx_disc_time_us;
 static CdCallback s_sync_callback, s_ready_callback;
 static uint8_t s_result[8];
 static uint8_t s_mode;
@@ -177,7 +179,11 @@ static void deliver_sector(void)
             }
             s_realtime_budget -= 2;
         }
-        if (disc_read_whole(s_disc, s_read_lba, s_sector)) {
+        uint64_t start = plat_time_us();
+        int failed = disc_read_whole(s_disc, s_read_lba, s_sector);
+
+        psx_disc_time_us += (uint32_t)(plat_time_us() - start);
+        if (failed) {
             s_reading = false;
             s_result[0] = (uint8_t)(status() | STAT_ERROR);
             s_ready_callback(INTR_DISK_ERROR, s_result);

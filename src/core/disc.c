@@ -1,9 +1,11 @@
 #include "disc.h"
 
 #include <ctype.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define PVD_LBA 16
+#define DISC_CACHE_SECTORS 32
 #define MAX_DIR_SECTORS 64 /* bounds the walk if a directory record is garbage */
 
 static uint32_t le32(const uint8_t *p)
@@ -11,24 +13,42 @@ static uint32_t le32(const uint8_t *p)
     return p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
 }
 
+/* The image sector `lba` as stored in the file, or NULL. */
+static const uint8_t *image_sector(Disc *d, uint32_t lba)
+{
+    uint32_t n;
+
+    if (lba >= d->sectors) {
+        return NULL;
+    }
+    if (lba - d->cache_lba >= d->cache_count) {
+        if (!d->cache && !(d->cache = malloc((size_t)DISC_CACHE_SECTORS * d->sector_size))) {
+            return NULL;
+        }
+        n = d->sectors - lba < DISC_CACHE_SECTORS ? d->sectors - lba : DISC_CACHE_SECTORS;
+        d->cache_count = 0;
+        if (fseek(d->f, (long)(lba * d->sector_size), SEEK_SET) || fread(d->cache, d->sector_size, n, d->f) != n) {
+            return NULL;
+        }
+        d->cache_lba = lba;
+        d->cache_count = n;
+    }
+    return d->cache + (size_t)(lba - d->cache_lba) * d->sector_size;
+}
+
 int disc_read(Disc *d, uint32_t lba, uint32_t count, void *dst)
 {
     uint8_t *out = dst;
+    const uint8_t *sec;
 
     if (lba >= d->sectors || count > d->sectors - lba) {
         return -1;
     }
-    if (d->sector_size == DISC_SECTOR_DATA) {
-        if (fseek(d->f, (long)(lba * DISC_SECTOR_DATA), SEEK_SET)) {
-            return -1;
-        }
-        return fread(out, DISC_SECTOR_DATA, count, d->f) == count ? 0 : -1;
-    }
     for (; count; count--, lba++, out += DISC_SECTOR_DATA) {
-        if (fseek(d->f, (long)(lba * d->sector_size + d->data_offset), SEEK_SET) ||
-            fread(out, DISC_SECTOR_DATA, 1, d->f) != 1) {
+        if (!(sec = image_sector(d, lba))) {
             return -1;
         }
+        memcpy(out, sec + d->data_offset, DISC_SECTOR_DATA);
     }
     return 0;
 }
@@ -46,10 +66,13 @@ int disc_read_whole(Disc *d, uint32_t lba, uint8_t *dst)
         return -1;
     }
     if (d->sector_size == DISC_SECTOR_RAW) {
-        return fseek(d->f, (long)(lba * DISC_SECTOR_RAW + 12), SEEK_SET) ||
-                       fread(dst, DISC_SECTOR_WHOLE, 1, d->f) != 1
-                   ? -1
-                   : 0;
+        const uint8_t *sec = image_sector(d, lba);
+
+        if (!sec) {
+            return -1;
+        }
+        memcpy(dst, sec + 12, DISC_SECTOR_WHOLE);
+        return 0;
     }
     memset(dst, 0, DISC_SECTOR_WHOLE);
     dst[0] = to_bcd(frame / (75 * 60));
@@ -71,6 +94,7 @@ int disc_open(Disc *d, const char *path)
     if (!d->f) {
         return -1;
     }
+    setvbuf(d->f, NULL, _IONBF, 0); /* reads are large; the cache does the buffering */
     if (fseek(d->f, 0, SEEK_END) || (size = ftell(d->f)) < 0 || fseek(d->f, 0, SEEK_SET)) {
         goto fail;
     }
@@ -101,6 +125,9 @@ void disc_close(Disc *d)
         fclose(d->f);
         d->f = NULL;
     }
+    free(d->cache);
+    d->cache = NULL;
+    d->cache_count = 0;
 }
 
 bool disc_is_raw(const Disc *d)

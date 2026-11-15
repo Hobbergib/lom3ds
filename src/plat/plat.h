@@ -64,6 +64,11 @@ const char *plat_data_dir(void);
 
 /* Queues stereo 16-bit sound, `frames` sample pairs at 44100 Hz. */
 void plat_audio_submit(const int16_t *samples, int frames);
+/* Sample pairs of sound to make for this screen refresh, given the usual
+ * amount. The console's sound clock runs on whether or not the picture keeps
+ * up, so the 3DS answers from the time since the last call; the host build
+ * answers `nominal`, keeping its runs repeatable. */
+int plat_audio_due(int nominal);
 
 /* A worker on another processor core, for work that need not hold up the
  * game (sound). plat_worker_start returns false if the platform has no core

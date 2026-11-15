@@ -101,6 +101,7 @@ void psx_deliver_event(uint32_t desc, int32_t spec);
 /* Microseconds the game has spent drawing, for the port's speed report.
  * The reader resets it. */
 extern uint32_t psx_draw_time_us;
+extern uint32_t psx_disc_time_us; /* reading the disc image, also inside the work time */
 
 /* --- sound ------------------------------------------------------------- */
 

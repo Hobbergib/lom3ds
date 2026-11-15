@@ -2,6 +2,7 @@
 #include "plat.h"
 
 #include "../core/log.h"
+#include "../game/prelude.h"
 #include "script.h"
 
 #include <3ds.h>
@@ -21,9 +22,10 @@ u32 __stacksize__ = 0x80000;
 #define AUDIO_BUFFERS 6
 
 #define AUDIO_CUSHION 2 /* chunks of silence played first whenever the queue has run dry */
-/* The game makes 735 sample pairs per screen refresh, and the screen runs at
- * 59.826 Hz, not 60: played at that rate the queue neither drains nor fills. */
-#define AUDIO_RATE 43972.0f
+/* Sound is made by the clock (plat_audio_due), so it plays at its own rate. */
+#define AUDIO_RATE 44100.0f
+/* After a longer stall (loading, the HOME menu) the missed sound is skipped. */
+#define AUDIO_MAX_CATCH_UP_US 100000u
 
 static ndspWaveBuf s_wave[AUDIO_BUFFERS], s_silence;
 static int16_t *s_audio_memory;
@@ -52,6 +54,132 @@ static void stop_if_fatal(void)
     }
 }
 
+/* Null pointers.
+ *
+ * On the PlayStation address 0 is ordinary RAM, so the game reads (and now
+ * and then writes) through null pointers without harm; here it faults. A
+ * fault in the first 64 KiB from a plain ARM load or store is finished by
+ * hand against the same bytes of the PlayStation RAM image, then the program
+ * resumes. The places are listed in log.txt (see plat_frame_begin). */
+#define NULL_WINDOW 0x10000u
+#define NULL_PCS 16
+
+static u32 s_null_pcs[NULL_PCS];
+static int s_null_count, s_null_logged;
+
+static u32 reg_value(const CpuRegisters *r, unsigned n)
+{
+    return n == 15 ? r->pc + 8 : n == 14 ? r->lr : n == 13 ? r->sp : r->r[n];
+}
+
+static void set_reg(CpuRegisters *r, unsigned n, u32 v)
+{
+    if (n == 13) r->sp = v;
+    else if (n == 14) r->lr = v;
+    else r->r[n] = v;
+}
+
+static uint8_t *null_target(u32 addr, u32 size)
+{
+    return addr < NULL_WINDOW && addr + size <= NULL_WINDOW ? psx_ram + addr : NULL;
+}
+
+/* Carries out the access of the ARM instruction at regs->pc against the
+ * RAM image. Returns false for anything it does not handle. */
+static bool emulate_null_access(CpuRegisters *r)
+{
+    u32 op = *(const u32 *)r->pc;
+    unsigned rn = op >> 16 & 15, rd = op >> 12 & 15;
+    bool p = op >> 24 & 1, u = op >> 23 & 1, w = op >> 21 & 1, l = op >> 20 & 1;
+    u32 base, offset, addr, size, value = 0;
+    bool sign = false, dual = false;
+    uint8_t *m;
+
+    /* A conditional instruction that faulted had its condition met. */
+    if ((r->cpsr & 0x20) || op >> 28 == 0xF || rn == 15 || rd == 15) {
+        return false; /* Thumb, unconditional space, or pc involved: not seen in game code */
+    }
+    base = reg_value(r, rn);
+    if ((op >> 26 & 3) == 1) { /* LDR/STR/LDRB/STRB */
+        size = op >> 22 & 1 ? 1 : 4;
+        if (op >> 25 & 1) {
+            unsigned shift = op >> 7 & 31, type = op >> 5 & 3;
+            u32 rm = reg_value(r, op & 15);
+
+            if (op >> 4 & 1) {
+                return false;
+            }
+            if (type == 0) offset = rm << shift;
+            else if (type == 1) offset = shift ? rm >> shift : 0;
+            else if (type == 2) offset = (u32)((int32_t)rm >> (shift ? shift : 31));
+            else if (shift) offset = rm >> shift | rm << (32 - shift);
+            else return false; /* RRX */
+        } else {
+            offset = op & 0xFFF;
+        }
+    } else if ((op >> 25 & 7) == 0 && (op & 0x90) == 0x90 && (op >> 5 & 3)) { /* halfword, signed, dual */
+        unsigned sh = op >> 5 & 3;
+
+        offset = op >> 22 & 1 ? (op >> 4 & 0xF0) | (op & 15) : reg_value(r, op & 15);
+        if (l) {
+            size = sh == 2 ? 1 : 2;
+            sign = sh != 1;
+        } else if (sh == 1) {
+            size = 2;
+        } else {
+            size = 4; /* LDRD (sh 2) / STRD (sh 3) */
+            dual = true;
+            l = sh == 2;
+            if (rd & 1) return false;
+        }
+    } else {
+        return false;
+    }
+    addr = p ? (u ? base + offset : base - offset) : base;
+    if (!(m = null_target(addr, dual ? 8 : size))) {
+        return false;
+    }
+    if (l) {
+        if (size == 1) value = sign ? (u32)(int8_t)m[0] : m[0];
+        else if (size == 2) value = m[0] | m[1] << 8, value = sign ? (u32)(int16_t)value : value;
+        else memcpy(&value, m, 4);
+        set_reg(r, rd, value);
+        if (dual) {
+            memcpy(&value, m + 4, 4);
+            set_reg(r, rd + 1, value);
+        }
+    } else {
+        value = reg_value(r, rd);
+        if (size == 1) m[0] = (uint8_t)value;
+        else if (size == 2) m[0] = (uint8_t)value, m[1] = (uint8_t)(value >> 8);
+        else memcpy(m, &value, 4);
+        if (dual) {
+            value = reg_value(r, rd + 1);
+            memcpy(m + 4, &value, 4);
+        }
+    }
+    if ((!p || w) && !(l && (rn == rd || (dual && rn == rd + 1)))) {
+        set_reg(r, rn, u ? base + offset : base - offset);
+    }
+    r->pc += 4;
+    return true;
+}
+
+/* Restores every register from `r` and carries on there. The faulting
+ * thread's stack just below its sp is free, so the pc goes there. */
+__attribute__((naked, noreturn)) static void resume(__attribute__((unused)) CpuRegisters *r)
+{
+    __asm__ volatile("ldr r1, [r0, #52]\n\t" /* sp */
+                     "ldr r2, [r0, #60]\n\t" /* pc */
+                     "str r2, [r1, #-4]\n\t"
+                     "ldr r2, [r0, #64]\n\t" /* cpsr */
+                     "msr cpsr_fs, r2\n\t" /* flags and GE bits */
+                     "ldr lr, [r0, #56]\n\t"
+                     "mov sp, r1\n\t"
+                     "ldm r0, {r0-r12}\n\t"
+                     "ldr pc, [sp, #-4]\n\t");
+}
+
 /* A processor exception (bad pointer, undefined instruction): record what
  * tools/symbolize.py needs to name the place, then stop with a message. */
 static void on_crash(ERRF_ExceptionInfo *excep, CpuRegisters *regs)
@@ -61,6 +189,21 @@ static void on_crash(ERRF_ExceptionInfo *excep, CpuRegisters *regs)
     char stack[400] = "";
     int i, len = 0;
 
+    if (excep->type == ERRF_EXCEPTION_DATA_ABORT && excep->far < NULL_WINDOW && !crashed) {
+        u32 pc = regs->pc;
+
+        if (emulate_null_access(regs)) {
+            int n = __atomic_load_n(&s_null_count, __ATOMIC_RELAXED);
+
+            for (i = 0; i < n && s_null_pcs[i] != pc; i++) {
+            }
+            if (i == n && n < NULL_PCS) {
+                s_null_pcs[n] = pc;
+                __atomic_store_n(&s_null_count, n + 1, __ATOMIC_RELEASE);
+            }
+            resume(regs);
+        }
+    }
     if (crashed) {
         svcExitProcess();
     }
@@ -157,6 +300,23 @@ static bool audio_queue_empty(void)
         }
     }
     return wave_idle(&s_silence);
+}
+
+int plat_audio_due(int nominal)
+{
+    static uint64_t last, carry; /* carry: microseconds times the rate, not yet made */
+    uint64_t now = plat_time_us(), us = now - last;
+    int n;
+
+    if (!last || us > AUDIO_MAX_CATCH_UP_US) {
+        last = now;
+        return nominal;
+    }
+    last = now;
+    carry += us * (uint64_t)AUDIO_RATE;
+    n = (int)(carry / 1000000u);
+    carry %= 1000000u;
+    return n;
 }
 
 void plat_audio_submit(const int16_t *samples, int frames)
@@ -313,6 +473,10 @@ bool plat_frame_begin(PlatInput *in)
     uint32_t held, down, rep;
 
     stop_if_fatal();
+    while (s_null_logged < __atomic_load_n(&s_null_count, __ATOMIC_ACQUIRE)) {
+        log_line("read through a null pointer at pc %08lx, given PlayStation RAM as the console would",
+                 s_null_pcs[s_null_logged++]);
+    }
     if (!aptMainLoop()) {
         return false;
     }

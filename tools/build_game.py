@@ -58,6 +58,18 @@ NULL_READS = {
     ],
 }
 
+# Null reads that do not fit the pointer->member form above:
+# (file, original text, replacement); the original must occur exactly once.
+# (The 3DS build also finishes any other null access by hand; see
+# emulate_null_access in src/plat/plat_3ds.c. This list keeps the host
+# build, which has no such fallback, on the same footing.)
+NULL_FIXES = [
+    # Item status page opened with no item chosen: the title is read from
+    # address 0, which holds zero on the console.
+    ("src/overlays/menu/menu.c", "u8* title = (u8*)g_menu_item_ptr;",
+     "u8* title = (u8*)PSX_NULL_OK(g_menu_item_ptr);"),
+]
+
 # Calls that pass fewer arguments than the callee takes. The original code
 # got away with it because the missing arguments were still in the MIPS
 # argument registers from the caller's own parameters; other processors do
@@ -199,7 +211,7 @@ def stage_sources(decomp, stage):
                 if expr not in new:
                     sys.exit(f"{rel}: expected to find {expr}")
                 new = new.replace(expr, f"PSX_NULL_OK({base})->{member}")
-            for path, before, after in ARGUMENT_FIXES + LOAD_NOTIFICATIONS:
+            for path, before, after in ARGUMENT_FIXES + LOAD_NOTIFICATIONS + NULL_FIXES:
                 if path == str(rel):
                     if new.count(before) != 1:
                         sys.exit(f"{rel}: expected exactly one {before!r}")
